@@ -1,0 +1,235 @@
+
+
+### 🧠 Purpose of the Code
+
+This stored procedure is meant to **move data from the Bronze layer to the Silver layer** in a Data Warehouse — that is, **clean and transform** data before using it for reporting or analytics.
+
+So, every table that’s being loaded here (like `crm_cust_info`, `crm_prd_info`, etc.) has **specific checks and cleaning rules** for its columns.
+
+---
+
+### ⚙️ What’s Being Checked in Each Table
+
+Let’s go one by one 👇
+
+#### 1. `silver.crm_cust_info`
+
+**Source:** `bronze.crm_cust_info`
+**Goal:** Keep only the latest, clean customer record.
+
+**Checks done:**
+
+* Removes spaces (`TRIM`) from names.
+* Converts marital status:
+
+  * `S` → “Single”
+  * `M` → “Married”
+  * Else → “n/a”
+* Converts gender:
+
+  * `F` → “Female”
+  * `M` → “Male”
+  * Else → “n/a”
+* Keeps only the most recent record per customer using:
+
+  ```sql
+  ROW_NUMBER() OVER (PARTITION BY cst_id ORDER BY cst_create_date DESC)
+  ```
+
+  → This ensures no duplicate customer records.
+
+---
+
+#### 2. `silver.crm_prd_info`
+
+**Source:** `bronze.crm_prd_info`
+**Goal:** Clean and format product data.
+
+**Checks done:**
+
+* Extracts category ID and product key from `prd_key` using `SUBSTRING`.
+* If product cost (`prd_cost`) is missing → replace with 0.
+* Converts product line codes:
+
+  * `M` → “Mountain”
+  * `R` → “Road”
+  * `S` → “Other Sales”
+  * `T` → “Touring”
+  * Else → “n/a”
+* Calculates end date for each product as one day before the next product’s start date using:
+
+  ```sql
+  LEAD(prd_start_dt) OVER (...)
+  ```
+
+---
+
+#### 3. `silver.crm_sales_details`
+
+**Source:** `bronze.crm_sales_details`
+**Goal:** Correct invalid or missing sales data.
+
+**Checks done:**
+
+* Converts invalid date values (like `0` or wrong length) to `NULL`.
+* Recalculates total sales if it doesn’t match `quantity * price`.
+* Fixes missing or zero price values using:
+
+  ```sql
+  sls_sales / NULLIF(sls_quantity, 0)
+  ```
+
+---
+
+#### 4. `silver.erp_cust_az12`
+
+**Source:** `bronze.erp_cust_az12`
+**Goal:** Clean ERP customer data.
+
+**Checks done:**
+
+* Removes “NAS” prefix from customer ID (`cid`).
+* If birthdate (`bdate`) is in the future → set to `NULL`.
+* Standardizes gender values (“M”/“FEMALE” → “Male”/“Female”).
+
+---
+
+#### 5. `silver.erp_loc_a101`
+
+**Source:** `bronze.erp_loc_a101`
+**Goal:** Clean country information.
+
+**Checks done:**
+
+* Removes hyphens from `cid`.
+* Expands country codes:
+
+  * `DE` → “Germany”
+  * `US` or `USA` → “United States”
+  * Empty or NULL → “n/a”
+
+---
+
+#### 6. `silver.erp_px_cat_g1v2`
+
+**Source:** `bronze.erp_px_cat_g1v2`
+**Goal:** Copy product category data directly (no transformation).
+
+---
+
+### 🧾 Why the Code Ends Up Long
+
+Because:
+
+* Each **table** in Silver gets cleaned separately.
+* Each **column** inside those tables has its own **rules** (data type conversion, cleaning, or validation).
+* The script also includes **error handling**, **logging**, and **batch timing**, which adds extra lines.
+
+So yes — even though it looks long, every part has a clear **ETL purpose**.
+
+---
+
+### ✳️ Simplified Summary
+
+| Step                 | Action                          | Why                                    |
+| -------------------- | ------------------------------- | -------------------------------------- |
+| TRUNCATE TABLE       | Clears old data                 | So only fresh, clean data is loaded    |
+| INSERT INTO … SELECT | Loads transformed data          | Cleans, validates, and loads new rows  |
+| CASE / TRIM / CAST   | Cleans and fixes invalid values | To standardize data                    |
+| ROW_NUMBER()         | Removes duplicates              | Keeps only the latest record           |
+| PRINT                | Shows progress                  | For tracking ETL flow                  |
+| TRY / CATCH          | Handles errors                  | So one failure doesn’t stop everything |
+
+---
+
+
+##date columns are handled in each table 
+
+1. In silver.crm_cust_info
+
+Column: cst_create_date
+
+✅ What happens:
+This column is copied directly from the bronze table — no transformation, just preserved.
+
+Reason: It’s a proper datetime column already (used to identify the latest record).
+The filtering step ensures we keep only the latest entry per customer:
+
+ROW_NUMBER() OVER (PARTITION BY cst_id ORDER BY cst_create_date DESC)
+
+
+So even though it’s not cleaned, it’s used for logic.
+
+🧭 2. In silver.crm_prd_info
+
+Columns: prd_start_dt, prd_end_dt
+
+✅ What happens:
+
+CAST(prd_start_dt AS DATE) AS prd_start_dt,
+CAST(LEAD(prd_start_dt) OVER (...) - 1 AS DATE) AS prd_end_dt
+
+
+Explanation:
+
+Converts prd_start_dt into a proper SQL DATE format.
+
+Calculates prd_end_dt as one day before the next product’s start date, using the LEAD() function.
+
+🧠 Purpose:
+Ensures each product’s validity period (start → end) has no overlaps and follows chronological order.
+
+🧭 3. In silver.crm_sales_details
+
+Columns: sls_order_dt, sls_ship_dt, sls_due_dt
+
+✅ What happens:
+Each of these date columns is validated and corrected:
+
+CASE 
+    WHEN sls_order_dt = 0 OR LEN(sls_order_dt) != 8 THEN NULL
+    ELSE CAST(CAST(sls_order_dt AS VARCHAR) AS DATE)
+END AS sls_order_dt
+
+
+Explanation:
+
+If the value is 0 or not an 8-digit number (like 20250123), it becomes NULL.
+
+If it’s valid (e.g. 20250123), it’s cast to a proper DATE (2025-01-23).
+
+🧠 Purpose:
+Avoids invalid dates that would break reports or calculations.
+E.g. 00000000 or 99999999 becomes NULL instead of causing an error.
+
+🧭 4. In silver.erp_cust_az12
+
+Column: bdate (birth date)
+
+✅ What happens:
+
+CASE WHEN bdate > GETDATE() THEN NULL ELSE bdate END AS bdate
+
+
+Explanation:
+If the birthdate is in the future (like 2050-05-10), it’s clearly wrong → set to NULL.
+
+🧠 Purpose:
+Ensures the data makes logical sense.
+You can’t have a birthdate greater than today.
+
+🧾 Summary Table
+Table	Date Columns	Validation / Transformation	Why
+crm_cust_info	cst_create_date	Used for finding latest record	Ensures only latest record is loaded
+crm_prd_info	prd_start_dt, prd_end_dt	Cast to DATE, prd_end_dt = next start date − 1	Maintains valid product date ranges
+crm_sales_details	sls_order_dt, sls_ship_dt, sls_due_dt	Invalid (0 or wrong length) → NULL	Cleans and standardizes date fields
+erp_cust_az12	bdate	Future date → NULL	Removes logically invalid birthdates
+✳️ Why All This Matters
+
+## If you don’t clean date columns:
+
+Queries like WHERE order_date BETWEEN ... might fail or return wrong results.
+
+Charts in Power BI or dashboards might crash due to invalid date formats.
+
+Analytics (like monthly sales trends) would show inconsistent data.
