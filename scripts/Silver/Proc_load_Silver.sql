@@ -208,7 +208,13 @@ BEGIN
                 ELSE TRIM(cntry)
             END
         FROM bronze.erp_loc_a101;
-        -- Cleans and standardizes country codes for reporting
+        -- Cleans and standardizes country codes for reporting 
+
+       --select id,cat,subcat,maintainance from bronze.erp_px_cat_g1v2;
+       --chack for unwanted spaces
+       -- select * from bronze.erp_px_cat_g1v2 where cat!=TRIM(cat) or maintainance !=TRIM(maintainance) 
+       -- check for data standardization 
+ 
 
         SET @end_time = GETDATE();
         PRINT '>> Load Duration: ' + CAST(DATEDIFF(SECOND, @start_time, @end_time) AS NVARCHAR) + ' seconds';
