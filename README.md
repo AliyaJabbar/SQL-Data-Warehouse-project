@@ -139,11 +139,8 @@ https://github.com/AliyaJabbar/SQL-Data-Warehouse-project/blob/main/docs/dataflo
 
 ---
 
-## 👩‍💻 Author
 
-**Aliya Jabbar**
-🎓 MSc Computer Science | 💡 Data Enthusiast | 🌱 Continuous Learner
-📧 [Add your email or LinkedIn URL here]
+
 
 ---
 
